@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "boxroom-quick-fill",
+  "name": "BOXROOM Quick Fill",
+  "author": "MidgetBrony",
+  "description": "Automatically fills the shelf you are looking at with unspawned media in A-Z order.",
+  "repository": "https://github.com/MidgetBrony/Boxroom-QuickFill",
+  "requirements": {
+    "melonLoader": "0.7.0"
+  },
+  "dependencies": [
+    {
+      "manifest": "https://raw.githubusercontent.com/MidgetBrony/ModsPanel/refs/heads/master/manifest.json",
+      "minimumVersion": "2.4.2",
+      "required": true
+    }
+  ],
+  "release": {
+    "provider": "github",
+    "asset": "Boxroom-QuickFill.*.zip",
+    "checksumAsset": "SHA256SUMS.txt",
+    "destination": "Mods"
+  }
+}
+
