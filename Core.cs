@@ -11,7 +11,7 @@ using System.Linq;
 using System.Reflection;
 using UnityEngine.InputSystem;
 
-[assembly: MelonInfo(typeof(BoxroomQuickFill.Core), "BOXROOM Quick Fill", "1.0.0", "Rusty")]
+[assembly: MelonInfo(typeof(BoxroomQuickFill.Core), "BOXROOM Quick Fill", "1.1.0", "Rusty")]
 [assembly: MelonGame("NestedLoop", "BOXROOM")]
 [assembly: MelonAdditionalDependencies("ModsPanel")]
 
@@ -22,16 +22,51 @@ namespace BoxroomQuickFill
         private const string OwnerId = "Rusty.BoxroomQuickFill";
         private const int AllCompatibleMedia = int.MinValue;
 
+        private static readonly string[] SteamContentLabels =
+        {
+            "Games only",
+            "Games and DLC",
+            "DLC only",
+            "All Steam content"
+        };
+
+        private static readonly string[] SteamToolLabels =
+        {
+            "Exclude tools and utilities",
+            "Include tools and utilities",
+            "Tools and utilities only"
+        };
+
+        private static readonly string[] ToolNameMarkers =
+        {
+            " dedicated server",
+            "authoring tools",
+            "development tools",
+            "mod tools",
+            "modding tools",
+            "workshop tool",
+            "publishing tool",
+            "tool kit",
+            " editor",
+            "steamworks sdk",
+            "source sdk",
+            " sdk"
+        };
+
         private static readonly FieldInfo LookingAtContainerField = typeof(PlayerInteractionTool)
             .GetField("currentLookingAtContainer", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private static MelonPreferences_Entry<int> selectedMediaType;
+        private static MelonPreferences_Entry<int> selectedSteamContent;
+        private static MelonPreferences_Entry<int> selectedSteamTools;
         private static MelonPreferences_Entry<bool> enabled;
 
         public override void OnInitializeMelon()
         {
             MelonPreferences_Category preferences = MelonPreferences.CreateCategory("BoxroomQuickFill");
             selectedMediaType = preferences.CreateEntry("MediaType", AllCompatibleMedia, "What Quick Fill should place");
+            selectedSteamContent = preferences.CreateEntry("SteamContent", (int)SteamContent.GamesOnly, "Which Steam content Quick Fill should place when Games is selected");
+            selectedSteamTools = preferences.CreateEntry("SteamTools", (int)SteamTools.Exclude, "Whether Steam tools and utilities should be included when Games is selected");
             enabled = preferences.CreateEntry("Enabled", true, "Enable the O shortcut");
 
             RegisterSettings();
@@ -113,7 +148,70 @@ namespace BoxroomQuickFill
                 return false;
             if (wantedType != AllCompatibleMedia && (int)item.Ref.Type != wantedType)
                 return false;
+            if (wantedType == 0 && !MatchesSteamFilters(item))
+                return false;
             return container.CanAccept(item);
+        }
+
+        private static bool MatchesSteamFilters(IMediaItem item)
+        {
+            if (!(item is SteamGameData steamItem))
+                return true;
+
+            bool isTool = IsSteamToolOrUtility(steamItem);
+            SteamTools toolChoice = GetEnumValue(selectedSteamTools, SteamTools.Exclude);
+            if (toolChoice == SteamTools.ToolsOnly)
+                return isTool;
+            if (toolChoice == SteamTools.Exclude && isTool)
+                return false;
+            if (toolChoice == SteamTools.Include && isTool)
+                return true;
+
+            string appType = (steamItem.AppType ?? string.Empty).Trim();
+            SteamContent contentChoice = GetEnumValue(selectedSteamContent, SteamContent.GamesOnly);
+            switch (contentChoice)
+            {
+                case SteamContent.GamesAndDlc:
+                    return IsGameType(appType) || IsDlcType(appType);
+                case SteamContent.DlcOnly:
+                    return IsDlcType(appType);
+                case SteamContent.All:
+                    return true;
+                default:
+                    return IsGameType(appType);
+            }
+        }
+
+        private static bool IsGameType(string appType)
+        {
+            return string.IsNullOrEmpty(appType) ||
+                   string.Equals(appType, "game", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(appType, "custom", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsDlcType(string appType)
+        {
+            return string.Equals(appType, "dlc", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsSteamToolOrUtility(SteamGameData item)
+        {
+            string appType = (item.AppType ?? string.Empty).Trim();
+            if (string.Equals(appType, "custom", StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (string.Equals(appType, "tool", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(appType, "application", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            string name = (item.Name ?? string.Empty).Trim();
+            if (name.StartsWith("Proton ", StringComparison.OrdinalIgnoreCase) ||
+                name.EndsWith(" Runtime", StringComparison.OrdinalIgnoreCase) ||
+                name.EndsWith(" Tool", StringComparison.OrdinalIgnoreCase) ||
+                name.EndsWith(" Tools", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            string normalizedName = name.ToLowerInvariant();
+            return ToolNameMarkers.Any(marker => normalizedName.Contains(marker));
         }
 
         private static bool TryPlace(PlaceableMediaContainer container, IMediaItem item)
@@ -144,9 +242,39 @@ namespace BoxroomQuickFill
                     () => GetMediaChoices().Select(choice => choice.Label).ToArray(),
                     GetSelectedChoiceIndex,
                     SetSelectedChoiceIndex)
+                .AddDropdown(
+                    "steam-content",
+                    "When Media Type is Games",
+                    () => SteamContentLabels,
+                    () => GetChoiceIndex(selectedSteamContent, SteamContentLabels.Length),
+                    index => SetChoiceIndex(selectedSteamContent, index, SteamContentLabels.Length))
+                .AddDropdown(
+                    "steam-tools",
+                    "Steam Tools and Utilities",
+                    () => SteamToolLabels,
+                    () => GetChoiceIndex(selectedSteamTools, SteamToolLabels.Length),
+                    index => SetChoiceIndex(selectedSteamTools, index, SteamToolLabels.Length))
                 .AddLabel(
                     "instructions",
-                    "Look directly at a shelf and press O. Empty spaces are filled A-Z using only media that is not already spawned or held anywhere in BOXROOM.");
+                    "Look directly at a shelf and press O. Empty spaces are filled A-Z using only media that is not already spawned or held anywhere in BOXROOM. The two Steam filters apply only when Media Type is Games.");
+        }
+
+        private static int GetChoiceIndex(MelonPreferences_Entry<int> entry, int choiceCount)
+        {
+            int value = entry?.Value ?? 0;
+            return value >= 0 && value < choiceCount ? value : 0;
+        }
+
+        private static void SetChoiceIndex(MelonPreferences_Entry<int> entry, int index, int choiceCount)
+        {
+            if (index >= 0 && index < choiceCount)
+                Save(entry, index);
+        }
+
+        private static T GetEnumValue<T>(MelonPreferences_Entry<int> entry, T fallback) where T : struct
+        {
+            int value = entry?.Value ?? Convert.ToInt32(fallback);
+            return Enum.IsDefined(typeof(T), value) ? (T)Enum.ToObject(typeof(T), value) : fallback;
         }
 
         private static int GetSelectedChoiceIndex()
@@ -249,6 +377,21 @@ namespace BoxroomQuickFill
 
             internal int TypeId { get; }
             internal string Label { get; }
+        }
+
+        private enum SteamContent
+        {
+            GamesOnly,
+            GamesAndDlc,
+            DlcOnly,
+            All
+        }
+
+        private enum SteamTools
+        {
+            Exclude,
+            Include,
+            ToolsOnly
         }
     }
 }
